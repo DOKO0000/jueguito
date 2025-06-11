@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Web Doom Vista Superior - Enemigos con imágenes GitHub</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    body {
+      margin: 0;
+      background: #000a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: 'Press Start 2P', cursive, monospace;
+      color: white;
+      user-select: none;
+    }
+    canvas#gameCanvas {
+      background: #111;
+      border: 2px solid #222;
+      image-rendering: pixelated;
+      display: block;
+      position: relative;
+    }
+    #instructions {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      max-width: 320px;
+      line-height: 1.4;
+      z-index: 1000;
+    }
+    #enemyCount {
+      font-weight: 700;
+      color: #ff5555;
+    }
+    #levelIndicator {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #44ff44;
+      user-select: none;
+      z-index: 1000;
+    }
+    #gameOverOverlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      color: #ff4444;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 36px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 3000;
+      visibility: hidden;
+      user-select: none;
+      flex-direction: column;
+      gap: 24px;
+      text-align: center;
+    }
+    #restartButton {
+      font-size: 18px;
+      padding: 12px 24px;
+      background: #ff4444;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    #restartButton:hover {
+      background-color: #cc0000;
+    }
+  </style>
+</head>
+<body>
+  <div id="instructions">
+    Controles:<br>
+    W/↑: Mover adelante<br>
+    S/↓: Mover atrás<br>
+    A/←: Girar izquierda<br>
+    D/→: Girar derecha<br>
+    SPACE: Disparar<br>
+    R: Recargar<br>
+    Q: Cambiar arma<br>
+    ESC: Pausa<br><br>
+    Enemigos restantes: <span id="enemyCount">0</span>
+  </div>
+  <div id="levelIndicator">Nivel: 1</div>
+  <canvas id="gameCanvas" width="800" height="800"></canvas>
+
+  <div id="gameOverOverlay">
+    <div>¡Has Perdido!</div>
+    <button id="restartButton">Reiniciar Juego</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const enemyCountDisplay = document.getElementById('enemyCount');
+    const levelIndicator = document.getElementById('levelIndicator');
+    const gameOverOverlay = document.getElementById('gameOverOverlay');
+    const restartButton = document.getElementById('restartButton');
+
+    const tileSize = 64;
+    let mapWidth = 20;
+    let mapHeight = 20;
+    let map = [];
+    let level = 1;
+    let gameOver = false;
+
+    const player = {
+      x: 1.5,
+      y: 1.5,
+      angle: 0,
+      speed: 0,
+      rotationSpeed: 0,
+      size: 0.6,
+      moveSpeed: 0.07,
+      rotSpeed: 0.045
+    };
+
+    const keys = {};
+
+    const weapons = [
+      {
+        name: "Pistola",
+        ammo: 6,
+        maxAmmo: 6,
+        reloadTime: 1200,
+        fireRate: 300,
+        isReloading: false,
+        lastShotTime: 0
+      },
+      {
+        name: "Escopeta",
+        ammo: 2,
+        maxAmmo: 2,
+        reloadTime: 2000,
+        fireRate: 800,
+        isReloading: false,
+        lastShotTime: 0
+      }
+    ];
+    let currentWeaponIndex = 0;
+    let shootingAnimationFrame = 0;
+
+    const bullets = [];
+    const bulletSpeed = 0.18;
+
+    let enemies = [];
+    const enemiesPerLevel = [15, 25];
+
+    // Cambia esta URL base por la URL cruda real de tu repositorio GitHub donde pongas las imagenes:
+    const githubBaseUrl = "https://raw.githubusercontent.com/tu-usuario/tu-repositorio/main/path-a-imagenes";
+
+    // Carga imágenes de enemigos desde el repositorio GitHub
+    const enemyImages = [
+      new Image(),
+      new Image(),
+      new Image(),
+      new Image(),
+      new Image()
+    ];
+    enemyImages[0].src = `${githubBaseUrl}/img-1.png`;
+    enemyImages[1].src = `${githubBaseUrl}/img-2.png`;
+    enemyImages[2].src = `${githubBaseUrl}/img-3.png`;
+    enemyImages[3].src = `${githubBaseUrl}/img-4.png`;
+    enemyImages[4].src = `${githubBaseUrl}/img-5.png`;
+
+    let cameraX = 0;
+    let cameraY = 0;
+
+    // Mapas precargados para niveles
+    const mapsByLevel = [
+      function generateRandomMap1() {
+        const width = 20;
+        const height = 20;
+        let newMap;
+        do {
+          newMap = [];
+          for (let y = 0; y < height; y++) {
+            newMap[y] = [];
+            for (let x = 0; x < width; x++) {
+              if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+                newMap[y][x] = 1;
+              } else {
+                newMap[y][x] = Math.random() < 0.20 ? 1 : 0;
+              }
+            }
+          }
+          newMap[Math.floor(player.y)][Math.floor(player.x)] = 0;
+        } while (!isFullyConnected(newMap, width, height, Math.floor(player.x), Math.floor(player.y)));
+        return {map: newMap, width, height};
+      },
+      function generateRandomMap2() {
+        const width = 25;
+        const height = 25;
+        let newMap;
+        do {
+          newMap = [];
+          for (let y = 0; y < height; y++) {
+            newMap[y] = [];
+            for (let x = 0; x < width; x++) {
+              if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+                newMap[y][x] = 1;
+              } else {
+                newMap[y][x] = Math.random() < 0.30 ? 1 : 0;
+              }
+            }
+          }
+          newMap[Math.floor(player.y)][Math.floor(player.x)] = 0;
+        } while (!isFullyConnected(newMap, width, height, Math.floor(player.x), Math.floor(player.y)));
+        return {map: newMap, width, height};
+      }
+    ];
+
+    function isFullyConnected(map, width, height, startX, startY) {
+      const visited = [];
+      for(let y=0;y<height;y++) {
+        visited[y] = Array(width).fill(false);
+      }
+      const queue = [];
+      queue.push({x:startX,y:startY});
+      visited[startY][startX] = true;
+
+      const directions = [
+        {dx:1,dy:0},
+        {dx:-1,dy:0},
+        {dx:0,dy:1},
+        {dx:0,dy:-1},
+      ];
+
+      while(queue.length > 0) {
+        const {x,y} = queue.shift();
+        for(const {dx,dy} of directions) {
+          const nx = x+dx;
+          const ny = y+dy;
+          if(nx>=0 && ny>=0 && nx<width && ny<height) {
+            if(!visited[ny][nx] && map[ny][nx] === 0) {
+              visited[ny][nx] = true;
+              queue.push({x:nx,y:ny});
+            }
+          }
+        }
+      }
+
+      for(let y=0;y<height;y++) {
+        for(let x=0;x<width;x++) {
+          if(map[y][x] === 0 && !visited[y][x]) return false;
+        }
+      }
+      return true;
+    }
+
+    function generateRandomEnemies(map, numEnemies, player, mapWidth, mapHeight) {
+      const newEnemies = [];
+      let placed = 0;
+      while (placed < numEnemies) {
+        const x = Math.floor(Math.random() * mapWidth);
+        const y = Math.floor(Math.random() * mapHeight);
+
+        // Aquí aseguramos que la celda del jugador esté siempre vacía y no se use para enemigo
+        if (map[y][x] === 0 && Math.abs(x - player.x) > 2 && Math.abs(y - player.y) > 2) {
+          const collided = newEnemies.some(e => (Math.abs(e.x - (x + 0.5)) < 0.7 && Math.abs(e.y - (y + 0.5)) < 0.7));
+          if (!collided) {
+            newEnemies.push({
+              x: x + 0.5,
+              y: y + 0.5,
+              size: 0.6,
+              alive: true,
+              speed: 0.02 + Math.random() * 0.015,
+              dirX: 0,
+              dirY: 0,
+              changeDirTimer: 0,
+              imageIndex: Math.floor(Math.random() * enemyImages.length)
+            });
+            placed++;
+          }
+        }
+      }
+      return newEnemies;
+    }
+
+    function initializeLevel(levelNum) {
+      if(levelNum < 1) levelNum = 1;
+      if(levelNum > mapsByLevel.length) {
+        alert("¡Completaste todos los niveles! Reiniciando al nivel 1.");
+        levelNum = 1;
+      }
+      level = levelNum;
+
+      const generated = mapsByLevel[levelNum - 1]();
+      map = generated.map;
+      mapWidth = generated.width;
+      mapHeight = generated.height;
+
+      enemies = generateRandomEnemies(map, enemiesPerLevel[levelNum - 1], player, mapWidth, mapHeight);
+
+      player.x = 1.5;
+      player.y = 1.5;
+
+      updateEnemyCount();
+      updateCamera();
+      updateLevelIndicator();
+      gameOver = false;
+      gameOverOverlay.style.visibility = 'hidden';
+
+      bullets.length = 0;
+      weapons.forEach(w => {
+        w.ammo = w.maxAmmo;
+        w.isReloading = false;
+        w.lastShotTime = 0;
+      });
+      currentWeaponIndex = 0;
+    }
+
+    function initializeGame() {
+      initializeLevel(1);
+    }
+
+    function updateLevelIndicator() {
+      levelIndicator.textContent = `Nivel: ${level}`;
+    }
+
+    function updateEnemyCount() {
+      const aliveCount = enemies.filter(e => e.alive).length;
+      enemyCountDisplay.textContent = aliveCount;
+
+      if (aliveCount === 0 && !gameOver) {
+        setTimeout(() => {
+          initializeLevel(level + 1);
+        }, 1500);
+      }
+    }
+
+    function attemptShoot() {
+      if(gameOver) return;
+      const weapon = weapons[currentWeaponIndex];
+      const now = performance.now();
+      if (weapon.isReloading) return;
+      if (weapon.ammo <= 0) return;
+      if (now - weapon.lastShotTime < weapon.fireRate) return;
+      weapon.ammo--;
+      weapon.lastShotTime = now;
+      shootingAnimationFrame = 5;
+
+      bullets.push({
+        x: player.x,
+        y: player.y,
+        dirX: Math.cos(player.angle),
+        dirY: Math.sin(player.angle),
+        size: 0.1,
+        speed: bulletSpeed,
+        alive: true
+      });
+    }
+
+    function attemptReload() {
+      if(gameOver) return;
+      const weapon = weapons[currentWeaponIndex];
+      if (weapon.isReloading) return;
+      if (weapon.ammo === weapon.maxAmmo) return;
+      weapon.isReloading = true;
+      setTimeout(() => {
+        weapon.ammo = weapon.maxAmmo;
+        weapon.isReloading = false;
+      }, weapon.reloadTime);
+    }
+
+    function switchWeapon() {
+      if(gameOver) return;
+      const prev = currentWeaponIndex;
+      currentWeaponIndex = (currentWeaponIndex + 1) % weapons.length;
+      weapons[prev].isReloading = false;
+      shootingAnimationFrame = 0;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if(gameOver) return;
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === ' ') {
+        attemptShoot();
+        e.preventDefault();
+      } else if (e.key.toLowerCase() === 'r') {
+        attemptReload();
+      } else if (e.key.toLowerCase() === 'q') {
+        switchWeapon();
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if(gameOver) return;
+      keys[e.key.toLowerCase()] = false;
+    });
+
+    function isWall(x, y) {
+      if (x < 0 || y < 0 || x >= mapWidth || y >= mapHeight) return true;
+      return map[Math.floor(y)][Math.floor(x)] === 1;
+    }
+
+    function checkCollision(x, y, size) {
+      const half = size / 2;
+      const margin = 0.01;
+      const points = [
+        { px: x - half - margin, py: y - half - margin },
+        { px: x + half + margin, py: y - half - margin },
+        { px: x - half - margin, py: y + half + margin },
+        { px: x + half + margin, py: y + half + margin }
+      ];
+      return points.some(p => isWall(p.px, p.py));
+    }
+
+    function movePlayer() {
+      if(gameOver) return;
+      if (keys['arrowleft'] || keys['a']) {
+        player.angle -= player.rotSpeed;
+      }
+      if (keys['arrowright'] || keys['d']) {
+        player.angle += player.rotSpeed;
+      }
+      let moveStep = 0;
+      if (keys['arrowup'] || keys['w']) {
+        moveStep = player.moveSpeed;
+      }
+      if (keys['arrowdown'] || keys['s']) {
+        moveStep = -player.moveSpeed;
+      }
+      if (moveStep !== 0) {
+        const stepX = Math.cos(player.angle) * moveStep;
+        const stepY = Math.sin(player.angle) * moveStep;
+        if (!checkCollision(player.x + stepX, player.y, player.size)) {
+          player.x += stepX;
+        }
+        if (!checkCollision(player.x, player.y + stepY, player.size)) {
+          player.y += stepY;
+        }
+      }
+    }
+
+    function bulletHitsEnemy(bullet, enemy) {
+      if (!enemy.alive) return false;
+      const dx = bullet.x - enemy.x;
+      const dy = bullet.y - enemy.y;
+      return (Math.abs(dx) < enemy.size / 2 + bullet.size) && (Math.abs(dy) < enemy.size / 2 + bullet.size);
+    }
+
+    function enemiesCollidePlayer(enemy, player) {
+      const dx = enemy.x - player.x;
+      const dy = enemy.y - player.y;
+      const combinedHalfSize = (enemy.size + player.size) / 2;
+      return Math.abs(dx) < combinedHalfSize && Math.abs(dy) < combinedHalfSize;
+    }
+
+    function updateBullets() {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i];
+        if (!b.alive) {
+          bullets.splice(i, 1);
+          continue;
+        }
+        b.x += b.dirX * b.speed;
+        b.y += b.dirY * b.speed;
+        if (isWall(b.x, b.y)) {
+          b.alive = false;
+          continue;
+        }
+        for (const enemy of enemies) {
+          if (bulletHitsEnemy(b, enemy)) {
+            enemy.alive = false;
+            b.alive = false;
+            break;
+          }
+        }
+        if (b.x < 0 || b.y < 0 || b.x > mapWidth || b.y > mapHeight) {
+          b.alive = false;
+        }
+      }
+    }
+
+    function updateEnemies() {
+      if(gameOver) return;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+
+        e.changeDirTimer -= 1;
+        if (e.changeDirTimer <= 0) {
+          let dx = player.x - e.x;
+          let dy = player.y - e.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            dx /= dist;
+            dy /= dist;
+          }
+          dx += (Math.random() - 0.5) * 0.3;
+          dy += (Math.random() - 0.5) * 0.3;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          e.dirX = dx / len;
+          e.dirY = dy / len;
+          e.changeDirTimer = 60 + Math.floor(Math.random() * 60);
+        }
+        const nextX = e.x + e.dirX * e.speed;
+        const nextY = e.y + e.dirY * e.speed;
+        if (!checkCollision(nextX, e.y, e.size)) e.x = nextX;
+        else e.changeDirTimer = 0;
+        if (!checkCollision(e.x, nextY, e.size)) e.y = nextY;
+        else e.changeDirTimer = 0;
+        if (enemiesCollidePlayer(e, player)) {
+          triggerGameOver();
+          break;
+        }
+      }
+    }
+
+    function drawMap() {
+      for (let y = 0; y < mapHeight; y++) {
+        for (let x = 0; x < mapWidth; x++) {
+          const screenX = x * tileSize - cameraX;
+          const screenY = y * tileSize - cameraY;
+          let isPlayerCell = false;
+          // Verificar si el jugador está en esta celda para pintar como vacía
+          if(Math.floor(player.x) === x && Math.floor(player.y) === y) {
+            isPlayerCell = true;
+          }
+          if (map[y][x] === 1 && !isPlayerCell) {
+            ctx.fillStyle = '#004400';
+            ctx.fillRect(screenX, screenY, tileSize, tileSize);
+            ctx.strokeStyle = '#006600';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(screenX, screenY, tileSize, tileSize);
+          } else {
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          }
+        }
+      }
+      ctx.strokeStyle = '#002200';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(-cameraX, -cameraY, mapWidth * tileSize, mapHeight * tileSize);
+    }
+
+    function isVisibleOnScreen(x, y, size) {
+      const px = x * tileSize - cameraX;
+      const py = y * tileSize - cameraY;
+      const halfSize = (size * tileSize) / 2;
+      return (
+        px + halfSize > 0 && px - halfSize < canvas.width &&
+        py + halfSize > 0 && py - halfSize < canvas.height
+      );
+    }
+
+    function drawPlayer() {
+      const px = player.x * tileSize - cameraX;
+      const py = player.y * tileSize - cameraY;
+      const size = player.size * tileSize;
+      ctx.fillStyle = '#00ff66';
+      ctx.strokeStyle = '#00dd55';
+      ctx.lineWidth = 3;
+      ctx.fillRect(px - size / 2, py - size / 2, size, size);
+      ctx.strokeRect(px - size / 2, py - size / 2, size, size);
+
+      const dirX = Math.cos(player.angle) * size;
+      const dirY = Math.sin(player.angle) * size;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + dirX, py + dirY);
+      ctx.stroke();
+    }
+
+    function drawEnemies() {
+      for (const enemy of enemies) {
+        if (enemy.alive && isVisibleOnScreen(enemy.x, enemy.y, enemy.size)) {
+          const ex = enemy.x * tileSize - cameraX;
+          const ey = enemy.y * tileSize - cameraY;
+          const size = enemy.size * tileSize;
+          ctx.fillStyle = '#ff4444';
+          ctx.fillRect(ex - size / 2, ey - size / 2, size, size);
+          ctx.strokeStyle = '#bb2222';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ex - size / 2, ey - size / 2, size, size);
+        }
+      }
+    }
+
+    function drawBullets() {
+      ctx.fillStyle = 'yellow';
+      for (const b of bullets) {
+        if (b.alive && isVisibleOnScreen(b.x, b.y, b.size)) {
+          const bx = b.x * tileSize - cameraX;
+          const by = b.y * tileSize - cameraY;
+          const radius = b.size * tileSize;
+          ctx.beginPath();
+          ctx.arc(bx, by, radius, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+    }
+
+    function drawUI() {
+      const weapon = weapons[currentWeaponIndex];
+      ctx.fillStyle = 'white';
+      ctx.font = '20px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${weapon.name}`, 16, canvas.height - 50);
+      if (weapon.isReloading) {
+        ctx.fillText(`Recargando...`, 16, canvas.height - 20);
+      } else {
+        ctx.fillText(`Balas: ${weapon.ammo} / ${weapon.maxAmmo}`, 16, canvas.height - 20);
+      }
+      ctx.fillText(`Presiona Q para cambiar arma`, 16, canvas.height - 80);
+    }
+
+    function updateCamera() {
+      cameraX = player.x * tileSize - canvas.width / 2;
+      cameraY = player.y * tileSize - canvas.height / 2;
+      cameraX = Math.max(0, Math.min(cameraX, mapWidth * tileSize - canvas.width));
+      cameraY = Math.max(0, Math.min(cameraY, mapHeight * tileSize - canvas.height));
+    }
+
+    function triggerGameOver() {
+      gameOver = true;
+      gameOverOverlay.style.visibility = 'visible';
+    }
+
+    restartButton.addEventListener('click', () => {
+      initializeGame();
+    });
+
+    function gameLoop() {
+      if (!gameOver) {
+        movePlayer();
+        updateBullets();
+        updateEnemies();
+        updateCamera();
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawMap();
+      drawEnemies();
+      drawBullets();
+      drawPlayer();
+      drawUI();
+      updateEnemyCount();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function updateEnemies() {
+      if(gameOver) return;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+
+        e.changeDirTimer -= 1;
+        if (e.changeDirTimer <= 0) {
+          let dx = player.x - e.x;
+          let dy = player.y - e.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            dx /= dist;
+            dy /= dist;
+          }
+          dx += (Math.random() - 0.5) * 0.3;
+          dy += (Math.random() - 0.5) * 0.3;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          e.dirX = dx / len;
+          e.dirY = dy / len;
+          e.changeDirTimer = 60 + Math.floor(Math.random() * 60);
+        }
+        const nextX = e.x + e.dirX * e.speed;
+        const nextY = e.y + e.dirY * e.speed;
+        if (!checkCollision(nextX, e.y, e.size)) e.x = nextX;
+        else e.changeDirTimer = 0;
+        if (!checkCollision(e.x, nextY, e.size)) e.y = nextY;
+        else e.changeDirTimer = 0;
+        if (enemiesCollidePlayer(e, player)) {
+          triggerGameOver();
+          break;
+        }
+      }
+    }
+
+    initializeGame();
+    gameLoop();
+  </script>
+</body>
+</html>
